@@ -1,18 +1,21 @@
-/**
- * For more details on how to configure Wrangler, refer to:
- * https://developers.cloudflare.com/workers/wrangler/configuration/
- */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "network-operations-agent",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-11-18",
+	"compatibility_flags": ["nodejs_compat"],
 	"migrations": [
 		{
 			"new_sqlite_classes": [
 				"MyDurableObject"
 			],
 			"tag": "v1"
+		},
+		{
+			"new_sqlite_classes": [
+				"NetworkOperationsAgent"
+			],
+			"tag": "v2"
 		}
 	],
 	"durable_objects": {
@@ -20,6 +23,10 @@
 			{
 				"class_name": "MyDurableObject",
 				"name": "MY_DURABLE_OBJECT"
+			},
+			{
+				"class_name": "NetworkOperationsAgent",
+				"name": "NETWORK_OPERATIONS_AGENT"
 			}
 		]
 	},
@@ -27,6 +34,7 @@
 		"enabled": true
 	},
 	"upload_source_maps": true
+}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
@@ -55,4 +63,3 @@
 	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
 	 */
 	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
-}
