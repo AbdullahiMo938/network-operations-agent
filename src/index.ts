@@ -194,31 +194,64 @@ return Response.json({
         }
 
         // Interactive AI endpoint
-        if (url.pathname === "/ask" && request.method === "POST") {
-            const body = await request.json() as { message: string };
+        // Interactive endpoint "/ask"
+if (url.pathname === "/ask" && request.method === "POST") {
+    const body = await request.json() as { message: string };
+    const userMessage = body.message;
 
-            const userMessage = body.message;
+    const aiResponse = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
+        messages: [
+            {
+                role: "system",
+                content: "You are a network operations assistant. Answer network-related questions. If the user asks you to check whether a website is online, use the check_endpoint tool."
+            },
+            {
+                role: "user",
+                content: userMessage
+            }
+        ],
 
-            const aiResponse = await env.AI.run(
-                "@cf/zai-org/glm-4.7-flash",
-                {
-                    messages: [
-                        {
-                            role: "system",
-                            content: "You are a helpful network operations assistant. Help users with network-related questions."
-                        },
-                        {
-                            role: "user",
-                            content: userMessage
+        tools: [{
+            type: "function",
+            function: {
+                name: "check_endpoint",
+                description: "Checks whether a website is online and measures its response time.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        url: {
+                            type: "string",
+                            description: "The website URL to check."
                         }
-                    ]
+                    },
+                    required: ["url"]
                 }
-            );
+            }
+        }],
 
-            return Response.json({
-                success: true,
-                answer: aiResponse.choices[0]?.message.content
-            });
+        tool_choice: "auto"
+    });
+
+const toolCall = aiResponse.choices[0]?.message.tool_calls?.[0];
+
+if (
+    toolCall?.type === "function" &&
+    toolCall.function.name === "check_endpoint"
+) {
+    const args = JSON.parse(toolCall.function.arguments);
+    const result = await checkEndpoint(args.url);
+
+    return Response.json({
+        success: true,
+        tool: "check_endpoint",
+        result
+    });
+}
+
+return Response.json({
+    success: true,
+    answer: aiResponse.choices[0]?.message.content
+});
 }
 
         // Route requests to our AI Agent
