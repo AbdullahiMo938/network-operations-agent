@@ -145,6 +145,87 @@ function calculateActiveDowntime(incidents: Incident[]): number {
 
     return calculateTotalDowntime(activeIncidents);
 }
+function calculateUptimePercentage(
+    checks: {
+        url: string;
+        online: boolean;
+        statusCode: number | null;
+        responseTime: number;
+        checkedAt: string;
+    }[]
+) {
+    const websiteStats: Record<string, { total: number; online: number }> = {};
+
+    for (const check of checks) {
+        if (!websiteStats[check.url]) {
+            websiteStats[check.url] = {
+                total: 0,
+                online: 0,
+            };
+        }
+
+        websiteStats[check.url].total++;
+
+        if (check.online) {
+            websiteStats[check.url].online++;
+        }
+    }
+
+    return Object.entries(websiteStats).map(([url, stats]) => ({
+        url,
+        totalChecks: stats.total,
+        successfulChecks: stats.online,
+        failedChecks: stats.total - stats.online,
+        uptimePercentage: Number(
+            ((stats.online / stats.total) * 100).toFixed(2)
+        ),
+    }));
+}
+function calculateAverageResponseTime(
+    checks: {
+        url: string;
+        online: boolean;
+        statusCode: number | null;
+        responseTime: number;
+        checkedAt: string;
+    }[]
+) {
+    const websiteStats: Record<string, { total: number; responseTime: number }> = {};
+
+    for (const check of checks) {
+        if (!websiteStats[check.url]) {
+            websiteStats[check.url] = {
+                total: 0,
+                responseTime: 0,
+            };
+        }
+
+        websiteStats[check.url].total++;
+        websiteStats[check.url].responseTime += check.responseTime;
+    }
+
+    return Object.entries(websiteStats).map(([url, stats]) => ({
+        url,
+        totalChecks: stats.total,
+        averageResponseTime: Math.round(
+            stats.responseTime / stats.total
+        ),
+    }));
+}
+function getSlowestWebsites(
+    checks: {
+        url: string;
+        online: boolean;
+        statusCode: number | null;
+        responseTime: number;
+        checkedAt: string;
+    }[]
+) {
+    return calculateAverageResponseTime(checks)
+        .sort(
+            (a, b) => b.averageResponseTime - a.averageResponseTime
+        );
+}
 function countActiveIncidents(incidents: Incident[]): number {
     return incidents.filter(
         (incident) => incident.status === "active"
@@ -494,12 +575,18 @@ result = {
     longestActiveIncident,
 };
 
-    } else if (intent === "recent_checks") {
-        toolName = "get_recent_checks";
-        const status = await agent.getStatus();
-        result = status.recentChecks ?? [];
+} else if (intent === "recent_checks") {
+    toolName = "get_recent_checks";
+    const status = await agent.getStatus();
+    const checks = status.recentChecks ?? [];
 
-    } else if (intent === "check_endpoint") {
+    result = {
+        recentChecks: checks,
+        uptimePercentage: calculateUptimePercentage(checks),
+        averageResponseTime: calculateAverageResponseTime(checks),
+        slowestWebsites: getSlowestWebsites(checks),
+    };
+}  else if (intent === "check_endpoint") {
         // Pull a URL or domain out of the message
         const match = userMessage.match(
             /https?:\/\/[^\s]+|(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s]*)?/i
