@@ -47,6 +47,7 @@ export class NetworkOperationsAgent extends Agent<
     {
         status: string;
         incidentsHandled: number;
+        activeIncidents: string[];
         recentChecks: {
             url: string;
             online: boolean;
@@ -57,22 +58,34 @@ export class NetworkOperationsAgent extends Agent<
     }
 > {
     initialState = {
-        status: "Online",
-        incidentsHandled: 0,
-        recentChecks: [],
-    };
+    status: "Online",
+    incidentsHandled: 0,
+    activeIncidents: [],
+    recentChecks: [],
+};
 
     onRequest(): Response {
         return Response.json(this.state);
     }
 
     @callable()
-    async recordIncident(): Promise<void> {
+
+    async recordIncident(url: string): Promise<void> {
+        const activeIncidents = this.state.activeIncidents ?? [];
+
+        if (activeIncidents.includes(url)) {
+            return;
+        }
+
         this.setState({
             ...this.state,
             incidentsHandled: this.state.incidentsHandled + 1,
+            activeIncidents: [
+                ...activeIncidents,
+                url
+            ]
         });
-    }
+}
     @callable()
     async recordCheck(check: {
         url: string;
@@ -206,14 +219,7 @@ if (url.pathname === "/test-ai") {
         });
     }
 }
-        // Test incident tracking
-        if (url.pathname === "/test-incident") {
-            const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
-
-            await agent.recordIncident();
-
-            return Response.json(await agent.getStatus());
-        }
+ 
 
         // Test network connectivity
         if (url.pathname === "/test-network") {
@@ -232,7 +238,7 @@ if (url.pathname === "/ask" && request.method === "POST") {
         messages: [
             {
                 role: "system",
-               content: "You are a network operations assistant. Answer network-related questions. Use check_endpoint when asked to check a website. Use get_recent_checks when asked about previous network checks or historical network activity."
+               content: "You are a network operations assistant. Follow these tool-selection rules carefully: 1. Use check_endpoint ONLY when the user explicitly requests a new live network check. 2. Use get_recent_checks whenever the user asks about previous checks, historical results, response-time comparisons, failed checks, or network activity. 3. Never perform a new network check when the user only asks about historical data. 4. When comparing response times, use the stored results and calculate the difference in milliseconds."
             },
             {
                 role: "user",
@@ -292,6 +298,10 @@ tools: [
                 responseTime: checkResult.responseTime,
                 checkedAt: new Date().toISOString()
             });
+
+            if (!checkResult.online) {
+                await agent.recordIncident(args.url);
+}
 
             result = checkResult;
         } else if (toolCall.function.name === "get_recent_checks") {
