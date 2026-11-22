@@ -41,13 +41,25 @@ async function checkEndpoint(url: string) {
 
 
 //  Network Operations Agent
+// Network Operations Agent
 export class NetworkOperationsAgent extends Agent<
     Env,
-    { status: string; incidentsHandled: number }
+    {
+        status: string;
+        incidentsHandled: number;
+        recentChecks: {
+            url: string;
+            online: boolean;
+            statusCode: number | null;
+            responseTime: number;
+            checkedAt: string;
+        }[];
+    }
 > {
     initialState = {
         status: "Online",
         incidentsHandled: 0,
+        recentChecks: [],
     };
 
     onRequest(): Response {
@@ -61,10 +73,30 @@ export class NetworkOperationsAgent extends Agent<
             incidentsHandled: this.state.incidentsHandled + 1,
         });
     }
+    @callable()
+    async recordCheck(check: {
+        url: string;
+        online: boolean;
+        statusCode: number | null;
+        responseTime: number;
+        checkedAt: string;
+    }): Promise<void> {
+        console.log("recordCheck called:", check.url)
+        this.setState({
+            ...this.state,
+            recentChecks: [
+                check,
+                ...(this.state.recentChecks ?? [])
+            ].slice(0, 10),
+        });
+    }
+
+    @callable()
     getStatus() {
-    return this.state;
+        return this.state;
+    }
 }
-}
+
 
 // Worker entry point
 export default {
@@ -128,9 +160,28 @@ if (
     toolCall?.type === "function" &&
     toolCall.function.name === "check_endpoint"
 ) {
-    const args = JSON.parse(toolCall.function.arguments);
+const args = JSON.parse(toolCall.function.arguments);
 
 const result = await checkEndpoint(args.url);
+
+const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
+
+await agent.recordCheck({
+    url: args.url,
+    online: result.online,
+    statusCode: result.statusCode,
+    responseTime: result.responseTime,
+    checkedAt: new Date().toISOString()
+});
+
+
+await agent.recordCheck({
+    url: args.url,
+    online: result.online,
+    statusCode: result.statusCode,
+    responseTime: result.responseTime,
+    checkedAt: new Date().toISOString()
+});
 
 const followUp = await env.AI.run(
     "@cf/zai-org/glm-4.7-flash",
@@ -238,14 +289,58 @@ if (
     toolCall?.type === "function" &&
     toolCall.function.name === "check_endpoint"
 ) {
-    const args = JSON.parse(toolCall.function.arguments);
-    const result = await checkEndpoint(args.url);
 
-    return Response.json({
-        success: true,
-        tool: "check_endpoint",
-        result
-    });
+
+const args = JSON.parse(toolCall.function.arguments);
+const result = await checkEndpoint(args.url);
+
+const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");   // <-- add
+await agent.recordCheck({                                              // <-- add
+    url: args.url,                                                     // <-- add
+    online: result.online,                                             // <-- add
+    statusCode: result.statusCode,                                     // <-- add
+    responseTime: result.responseTime,                                 // <-- add
+    checkedAt: new Date().toISOString()                                // <-- add
+});                                                                    // <-- add
+
+
+
+const followUp = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
+    messages: [
+        {
+            role: "system",
+            content: "You are a network operations assistant. Explain network-checking results clearly and concisely."
+        },
+        {
+            role: "user",
+            content: userMessage
+        },
+        {
+            role: "assistant",
+            content: "I am checking the website.",
+            tool_calls: [{
+                id: toolCall.id,
+                type: "function",
+                function: {
+                    name: "check_endpoint",
+                    arguments: toolCall.function.arguments
+                }
+            }]
+        },
+        {
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(result)
+        }
+    ]
+});
+
+return Response.json({
+    success: true,
+    tool: "check_endpoint",
+    result,
+    answer: followUp.choices[0]?.message.content
+});
 }
 
 return Response.json({
@@ -254,6 +349,11 @@ return Response.json({
 });
 }
 
+// "/test-memory"
+if (url.pathname === "/test-memory") {
+    const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
+    return Response.json(await agent.getStatus());
+}
         // Route requests to our AI Agent
         return (
             (await routeAgentRequest(request, env)) ??
