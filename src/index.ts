@@ -16,6 +16,7 @@ export class MyDurableObject extends DurableObject<Env> {
 // first network tool
 async function checkEndpoint(url: string) {
     const startTime = Date.now();
+    
 
     try {
         const response = await fetch(url, {
@@ -36,7 +37,13 @@ async function checkEndpoint(url: string) {
         };
     }
 }
-
+    // Incident structure
+    type Incident = {
+        url: string;
+        startedAt: string;
+        resolvedAt: string | null;
+        status: "active" | "resolved";
+    };
 
 
 
@@ -48,6 +55,7 @@ export class NetworkOperationsAgent extends Agent<
         status: string;
         incidentsHandled: number;
         activeIncidents: string[];
+        incidentHistory: Incident[];
         recentChecks: {
             url: string;
             online: boolean;
@@ -61,6 +69,7 @@ export class NetworkOperationsAgent extends Agent<
     status: "Online",
     incidentsHandled: 0,
     activeIncidents: [],
+    incidentHistory: [],
     recentChecks: [],
 };
 
@@ -69,7 +78,6 @@ export class NetworkOperationsAgent extends Agent<
     }
 
     @callable()
-
     async recordIncident(url: string): Promise<void> {
         const activeIncidents = this.state.activeIncidents ?? [];
 
@@ -77,13 +85,50 @@ export class NetworkOperationsAgent extends Agent<
             return;
         }
 
+        const newIncident: Incident = {
+            url,
+            startedAt: new Date().toISOString(),
+            resolvedAt: null,
+            status: "active",
+        };
+
         this.setState({
             ...this.state,
             incidentsHandled: this.state.incidentsHandled + 1,
             activeIncidents: [
                 ...activeIncidents,
                 url
-            ]
+            ],
+            incidentHistory: [
+                ...(this.state.incidentHistory ?? []),
+                newIncident
+            ],
+        });
+    }
+    @callable()
+    async resolveIncident(url: string): Promise<void> {
+        const activeIncidents = this.state.activeIncidents ?? [];
+
+        if (!activeIncidents.includes(url)) {
+            return;
+        }
+
+        const incidentHistory = this.state.incidentHistory ?? [];
+
+        this.setState({
+            ...this.state,
+            activeIncidents: activeIncidents.filter(
+                (incident) => incident !== url
+            ),
+            incidentHistory: incidentHistory.map((incident) =>
+                incident.url === url && incident.status === "active"
+                    ? {
+                        ...incident,
+                        resolvedAt: new Date().toISOString(),
+                        status: "resolved" as const,
+                    }
+                    : incident
+            ),
         });
 }
     @callable()
@@ -125,6 +170,16 @@ export default {
 
             return new Response(greeting);
         }
+        // Temporary incident recovery test
+if (url.pathname === "/test-resolve") {
+    const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
+
+    await agent.resolveIncident(
+        "https://this-domain-should-not-exist-12345.com"
+    );
+
+    return Response.json(await agent.getStatus());
+}
 // Test AI connection
 if (url.pathname === "/test-ai") {
     console.log("Sending request to Cloudflare AI...");
@@ -299,9 +354,11 @@ tools: [
                 checkedAt: new Date().toISOString()
             });
 
-            if (!checkResult.online) {
-                await agent.recordIncident(args.url);
-}
+        if (!checkResult.online) {
+            await agent.recordIncident(args.url);
+        } else {
+            await agent.resolveIncident(args.url);
+        }
 
             result = checkResult;
         } else if (toolCall.function.name === "get_recent_checks") {
