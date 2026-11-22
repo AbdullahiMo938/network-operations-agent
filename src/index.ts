@@ -44,9 +44,132 @@ async function checkEndpoint(url: string) {
         resolvedAt: string | null;
         status: "active" | "resolved";
     };
+    function calculateOutageDuration(incident: Incident): number {
+    const startTime = new Date(incident.startedAt).getTime();
 
+    const endTime = incident.resolvedAt
+        ? new Date(incident.resolvedAt).getTime()
+        : Date.now();
 
+    return endTime - startTime;
+}
+    function formatDuration(milliseconds: number): string {
+    const totalSeconds = Math.floor(milliseconds / 1000);
 
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${hours} hours, ${minutes} minutes`;
+    }
+
+    if (minutes > 0) {
+        return `${minutes} minutes, ${seconds} seconds`;
+    }
+
+    return `${seconds} seconds`;
+}
+function analyseIncidents(incidents: Incident[]) {
+    const incidentCounts: Record<string, number> = {};
+
+    for (const incident of incidents) {
+        incidentCounts[incident.url] =
+            (incidentCounts[incident.url] ?? 0) + 1;
+    }
+
+    const analysedIncidents = incidents.map((incident) => {
+        const duration = calculateOutageDuration(incident);
+
+        return {
+            url: incident.url,
+            status: incident.status,
+            startedAt: incident.startedAt,
+            resolvedAt: incident.resolvedAt,
+            durationMs: duration,
+            duration: formatDuration(duration),
+            totalIncidents: incidentCounts[incident.url],
+        };
+    });
+
+    return analysedIncidents;
+}
+
+function getMostUnreliableWebsites(incidents: Incident[]) {
+    const counts: Record<string, number> = {};
+
+    for (const incident of incidents) {
+        counts[incident.url] = (counts[incident.url] ?? 0) + 1;
+    }
+
+    return Object.entries(counts)
+        .map(([url, totalIncidents]) => ({
+            url,
+            totalIncidents,
+        }))
+        .sort((a, b) => b.totalIncidents - a.totalIncidents);
+}
+function calculateTotalDowntime(incidents: Incident[]): number {
+    return incidents.reduce((total, incident) => {
+        return total + calculateOutageDuration(incident);
+    }, 0);
+}
+function calculateAverageDowntime(incidents: Incident[]): number {
+    if (incidents.length === 0) {
+        return 0;
+    }
+
+    return calculateTotalDowntime(incidents) / incidents.length;
+}
+function calculateDowntimePerWebsite(incidents: Incident[]) {
+    const downtime: Record<string, number> = {};
+
+    for (const incident of incidents) {
+        downtime[incident.url] =
+            (downtime[incident.url] ?? 0) +
+            calculateOutageDuration(incident);
+    }
+
+    return Object.entries(downtime)
+        .map(([url, totalDowntime]) => ({
+            url,
+            totalDowntimeMs: totalDowntime,
+            totalDowntime: formatDuration(totalDowntime),
+        }))
+        .sort((a, b) => b.totalDowntimeMs - a.totalDowntimeMs);
+}
+function calculateActiveDowntime(incidents: Incident[]): number {
+    const activeIncidents = incidents.filter(
+        (incident) => incident.status === "active"
+    );
+
+    return calculateTotalDowntime(activeIncidents);
+}
+function countActiveIncidents(incidents: Incident[]): number {
+    return incidents.filter(
+        (incident) => incident.status === "active"
+    ).length;
+}
+function getLongestActiveIncident(incidents: Incident[]) {
+    const activeIncidents = incidents.filter(
+        (incident) => incident.status === "active"
+    );
+
+    if (activeIncidents.length === 0) {
+        return null;
+    }
+
+    return activeIncidents
+        .map((incident) => ({
+            url: incident.url,
+            durationMs: calculateOutageDuration(incident),
+            duration: formatDuration(
+                calculateOutageDuration(incident)
+            ),
+            startedAt: incident.startedAt,
+        }))
+        .sort((a, b) => b.durationMs - a.durationMs)[0];
+}
 //  Network Operations Agent
 // Network Operations Agent
 export class NetworkOperationsAgent extends Agent<
@@ -325,13 +448,7 @@ tools: [
         });
     }
 }
-         // TEMPORARY: test intent detection
-        if (url.pathname === "/test-intent") {
-            const q = url.searchParams.get("q") ?? "";
-            return Response.json({ q, intent: detectIntent(q) });
-        }
-
-        // Test network connectivity
+ // Test network connectivity
         if (url.pathname === "/test-network") {
             const result = await checkEndpoint("https://example.com");
 
@@ -353,7 +470,29 @@ if (url.pathname === "/ask" && request.method === "POST") {
     if (intent === "incident_history") {
         toolName = "get_incident_history";
         const status = await agent.getStatus();
-        result = status.incidentHistory ?? [];
+        const incidents = status.incidentHistory ?? [];
+
+        const totalDowntime = calculateTotalDowntime(incidents);
+        const averageDowntime = calculateAverageDowntime(incidents);
+
+        const activeDowntime = calculateActiveDowntime(incidents);
+        const activeIncidentCount = countActiveIncidents(incidents);
+        const longestActiveIncident = getLongestActiveIncident(incidents);
+
+
+result = {
+    incidents: analyseIncidents(incidents),
+    mostUnreliableWebsites: getMostUnreliableWebsites(incidents),
+    totalDowntimeMs: totalDowntime,
+    totalDowntime: formatDuration(totalDowntime),
+    averageDowntimeMs: averageDowntime,
+    averageDowntime: formatDuration(averageDowntime),
+    downtimePerWebsite: calculateDowntimePerWebsite(incidents),
+    activeDowntimeMs: activeDowntime,
+    activeDowntime: formatDuration(activeDowntime),
+    activeIncidentCount,
+    longestActiveIncident,
+};
 
     } else if (intent === "recent_checks") {
         toolName = "get_recent_checks";
