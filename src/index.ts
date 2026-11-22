@@ -156,77 +156,55 @@ if (url.pathname === "/test-ai") {
 
     const toolCall = response.choices[0]?.message.tool_calls?.[0];
 
-if (
-    toolCall?.type === "function" &&
-    toolCall.function.name === "check_endpoint"
-) {
-const args = JSON.parse(toolCall.function.arguments);
+    if (
+        toolCall?.type === "function" &&
+        toolCall.function.name === "check_endpoint"
+    ) {
+        const args = JSON.parse(toolCall.function.arguments);
+        const result = await checkEndpoint(args.url);
 
-const result = await checkEndpoint(args.url);
+        const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
+        await agent.recordCheck({
+            url: args.url,
+            online: result.online,
+            statusCode: result.statusCode,
+            responseTime: result.responseTime,
+            checkedAt: new Date().toISOString()
+        });
 
-const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
-
-await agent.recordCheck({
-    url: args.url,
-    online: result.online,
-    statusCode: result.statusCode,
-    responseTime: result.responseTime,
-    checkedAt: new Date().toISOString()
-});
-
-
-await agent.recordCheck({
-    url: args.url,
-    online: result.online,
-    statusCode: result.statusCode,
-    responseTime: result.responseTime,
-    checkedAt: new Date().toISOString()
-});
-
-const followUp = await env.AI.run(
-    "@cf/zai-org/glm-4.7-flash",
-    {
-        messages: [
-            {
-                role: "system",
-                content: "You are a network operations assistant. Explain network-checking results clearly and concisely."
-            },
-            {
-                role: "user",
-                content: "Check whether https://example.com is online."
-            },
-            {
-                role: "assistant",
-                content: "I am checking the website.",
-                tool_calls: [
-                    {
+        const followUp = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
+            messages: [
+                {
+                    role: "system",
+                    content: "You are a network operations assistant. Explain network-checking results clearly and concisely."
+                },
+                { role: "user", content: "Check whether https://example.com is online." },
+                {
+                    role: "assistant",
+                    content: "I am checking the website.",
+                    tool_calls: [{
                         id: toolCall.id,
                         type: "function",
                         function: {
                             name: "check_endpoint",
                             arguments: toolCall.function.arguments
                         }
-                    }
-                ]
-            },
-            {
-                role: "tool",
-                tool_call_id: toolCall.id,
-                content: JSON.stringify(result)
-            }
-        ]
+                    }]
+                },
+                {
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    content: JSON.stringify(result)
+                }
+            ]
+        });
+
+        return Response.json({
+            success: true,
+            networkResult: result,
+            aiExplanation: followUp.choices[0]?.message.content
+        });
     }
-);
-
-return Response.json({
-    success: true,
-    networkResult: result,
-    aiExplanation: followUp.choices[0]?.message.content
-});
-}
-
-
-
 }
         // Test incident tracking
         if (url.pathname === "/test-incident") {
@@ -254,7 +232,7 @@ if (url.pathname === "/ask" && request.method === "POST") {
         messages: [
             {
                 role: "system",
-                content: "You are a network operations assistant. Answer network-related questions. If the user asks you to check whether a website is online, use the check_endpoint tool."
+               content: "You are a network operations assistant. Answer network-related questions. Use check_endpoint when asked to check a website. Use get_recent_checks when asked about previous network checks or historical network activity."
             },
             {
                 role: "user",
@@ -262,91 +240,106 @@ if (url.pathname === "/ask" && request.method === "POST") {
             }
         ],
 
-        tools: [{
-            type: "function",
-            function: {
-                name: "check_endpoint",
-                description: "Checks whether a website is online and measures its response time.",
-                parameters: {
-                    type: "object",
-                    properties: {
-                        url: {
-                            type: "string",
-                            description: "The website URL to check."
-                        }
-                    },
-                    required: ["url"]
-                }
+tools: [
+    {
+        type: "function",
+        function: {
+            name: "check_endpoint",
+            description: "Checks whether a website is online and measures its response time.",
+            parameters: {
+                type: "object",
+                properties: {
+                    url: {
+                        type: "string",
+                        description: "The website URL to check."
+                    }
+                },
+                required: ["url"]
             }
-        }],
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "get_recent_checks",
+            description: "Retrieves the 10 most recent network endpoint checks stored in persistent memory.",
+            parameters: {
+                type: "object",
+                properties: {},
+                required: []
+            }
+        }
+    }
+],
 
         tool_choice: "auto"
     });
 
-const toolCall = aiResponse.choices[0]?.message.tool_calls?.[0];
+    const toolCall = aiResponse.choices[0]?.message.tool_calls?.[0];
 
-if (
-    toolCall?.type === "function" &&
-    toolCall.function.name === "check_endpoint"
-) {
+    if (toolCall?.type === "function") {
+        let result: unknown;
+        const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
 
+        if (toolCall.function.name === "check_endpoint") {
+            const args = JSON.parse(toolCall.function.arguments);
+            const checkResult = await checkEndpoint(args.url);
 
-const args = JSON.parse(toolCall.function.arguments);
-const result = await checkEndpoint(args.url);
+            await agent.recordCheck({
+                url: args.url,
+                online: checkResult.online,
+                statusCode: checkResult.statusCode,
+                responseTime: checkResult.responseTime,
+                checkedAt: new Date().toISOString()
+            });
 
-const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");   // <-- add
-await agent.recordCheck({                                              // <-- add
-    url: args.url,                                                     // <-- add
-    online: result.online,                                             // <-- add
-    statusCode: result.statusCode,                                     // <-- add
-    responseTime: result.responseTime,                                 // <-- add
-    checkedAt: new Date().toISOString()                                // <-- add
-});                                                                    // <-- add
-
-
-
-const followUp = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
-    messages: [
-        {
-            role: "system",
-            content: "You are a network operations assistant. Explain network-checking results clearly and concisely."
-        },
-        {
-            role: "user",
-            content: userMessage
-        },
-        {
-            role: "assistant",
-            content: "I am checking the website.",
-            tool_calls: [{
-                id: toolCall.id,
-                type: "function",
-                function: {
-                    name: "check_endpoint",
-                    arguments: toolCall.function.arguments
-                }
-            }]
-        },
-        {
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(result)
+            result = checkResult;
+        } else if (toolCall.function.name === "get_recent_checks") {
+            const status = await agent.getStatus();
+            result = status.recentChecks ?? [];
+        } else {
+            result = { error: `Unknown tool: ${toolCall.function.name}` };
         }
-    ]
-});
 
-return Response.json({
-    success: true,
-    tool: "check_endpoint",
-    result,
-    answer: followUp.choices[0]?.message.content
-});
-}
+        const followUp = await env.AI.run("@cf/zai-org/glm-4.7-flash", {
+            messages: [
+                {
+                    role: "system",
+                    content: "You are a network operations assistant. Explain network-checking results and historical network activity clearly and concisely."
+                },
+                { role: "user", content: userMessage },
+                {
+                    role: "assistant",
+                    content: "I am retrieving the requested network information.",
+                    tool_calls: [{
+                        id: toolCall.id,
+                        type: "function",
+                        function: {
+                            name: toolCall.function.name,
+                            arguments: toolCall.function.arguments
+                        }
+                    }]
+                },
+                {
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    content: JSON.stringify(result)
+                }
+            ]
+        });
 
-return Response.json({
-    success: true,
-    answer: aiResponse.choices[0]?.message.content
-});
+        return Response.json({
+            success: true,
+            tool: toolCall.function.name,
+            result,
+            answer: followUp.choices[0]?.message.content
+        });
+    }
+
+    return Response.json({
+        success: true,
+        answer: aiResponse.choices[0]?.message.content
+    });
 }
 
 // "/test-memory"
