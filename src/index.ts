@@ -675,5 +675,51 @@ if (url.pathname === "/test-memory") {
         // Interactive AI endpoint
 
     
-    },
+     },
+
+    // Automatically triggered by Cloudflare Cron
+async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext
+): Promise<void> {
+    console.log(
+        "Scheduled monitoring triggered:",
+        new Date(controller.scheduledTime).toISOString()
+    );
+
+    const websites = [
+        "https://example.com",
+        "https://google.com",
+        "https://cloudflare.com",
+        
+    ];
+
+    const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
+
+    for (const website of websites) {
+        const result = await checkEndpoint(website);
+
+        console.log("Scheduled check:", {
+            url: website,
+            online: result.online,
+            statusCode: result.statusCode,
+            responseTime: result.responseTime,
+        });
+
+        await agent.recordCheck({
+            url: website,
+            online: result.online,
+            statusCode: result.statusCode,
+            responseTime: result.responseTime,
+            checkedAt: new Date().toISOString(),
+        });
+
+        if (!result.online) {
+            await agent.recordIncident(website);
+        } else {
+            await agent.resolveIncident(website);
+        }
+    }
+},
 } satisfies ExportedHandler<Env>;
