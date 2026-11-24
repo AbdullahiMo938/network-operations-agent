@@ -37,6 +37,12 @@ The goal is to demonstrate how cloud infrastructure, persistent state, automatio
 - Records notification timestamps and delivery status.
 - Handles Discord delivery failures without stopping scheduled monitoring.
 
+### Discord Notification Examples
+
+The agent sends Discord notifications when an outage is detected and when the affected website recovers.
+
+![Discord outage and recovery notifications](docs/images/discord-notifications.png)
+
 ### 5. AI-Powered Network Operations
 - Accepts natural-language questions through an API.
 - Identifies user intent and routes requests to the appropriate operation.
@@ -88,149 +94,17 @@ network-operations-agent/
 │   ├── index.ts
 │   └── env.d.ts
 │
+├── docs/
+│   └── images/
+│       └── discord-notifications.png
+│
 ├── worker-configuration.d.ts
 ├── wrangler.jsonc
 ├── package.json
 ├── package-lock.json
 ├── tsconfig.json
 ├── .gitignore
-└── .dev.vars
+└── README.md
 ```
 
-## Getting Started
-
-### Prerequisites
-
-- Node.js and npm
-- A Cloudflare account
-- Wrangler CLI
-- A Discord server and webhook
-
-### 1. Clone the repository
-
-```bash
-git clone (https://github.com/AbdullahiMo938/network-operations-agent/)
-cd network-operations-agent
-```
-
-### 2. Install dependencies
-
-```bash
-npm install
-```
-
-### 3. Configure environment variables
-
-Create a `.dev.vars` file in the project root:
-
-```env
-DISCORD_WEBHOOK_URL="YOUR_DISCORD_WEBHOOK_URL"
-```
-
-Keep this file private. It should be excluded from Git using `.gitignore`.
-
-### 4. Authenticate with Cloudflare
-
-```bash
-npx wrangler login
-```
-
-### 5. Generate Cloudflare types
-
-```bash
-npx wrangler types
-```
-
-### 6. Start local development
-
-```bash
-npm run dev
-```
-
-The local Worker runs at:
-
-```text
-http://localhost:8787
-```
-
-### 7. Test scheduled monitoring
-
-Start the Worker and trigger the scheduled handler manually:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/cdn-cgi/local/scheduled?cron=*/5+*+*+*+*" -Method GET
-```
-
-Check the Wrangler terminal for monitoring logs and your Discord channel for notifications.
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/` | GET | Basic Worker response |
-| `/ask` | POST | Natural-language network operations queries |
-| `/test-ai` | GET | Test AI integration |
-| `/test-network` | GET | Test endpoint monitoring |
-| `/test-memory` | GET | Inspect persistent Agent state |
-| `/test-discord` | GET | Test Discord notifications |
-
-The test endpoints are intended for development and should be removed or protected before production deployment.
-
-### Example: Ask the Agent
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/ask" -Method POST -ContentType "application/json" -Body '{"message":"Show me all active incidents and their total downtime."}'
-```
-
-## Monitoring Configuration
-
-The current scheduled monitoring configuration checks:
-
-- example.com
-- google.com
-- cloudflare.com
-
-Monitoring runs every five minutes.
-
-The monitored websites can be changed in the `scheduled()` function in `src/index.ts`.
-
-## Testing
-
-TypeScript compilation can be checked using:
-
-```bash
-npx tsc --noEmit
-```
-
-The project has been manually tested for:
-
-- Successful endpoint checks.
-- Failed endpoint checks.
-- Incident creation.
-- Duplicate incident prevention.
-- Incident recovery.
-- Persistent state across Worker restarts.
-- Uptime and response-time analytics.
-- Discord outage notifications.
-- Discord recovery notifications.
-- Duplicate alert prevention.
-- Notification history and delivery status.
-
-## Future Improvements
-
-Planned development includes:
-
-- Interactive network monitoring dashboard.
-- Historical performance visualisations.
-- Advanced AI-assisted incident investigation.
-- Improved automated testing.
-- Enhanced security and production deployment.
-- More detailed monitoring and alerting capabilities.
-
-## Author
-
-**Abdullahi Mohamoud**
-
-Computer Science graduate – Queen Mary University of London.
-
-GitHub: abdullahimo938
+The `.dev
