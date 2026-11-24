@@ -37,6 +37,21 @@ async function checkEndpoint(url: string) {
         };
     }
 }
+async function sendDiscordAlert(env: Env, message: string) {
+    const response = await fetch(env.DISCORD_WEBHOOK_URL, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+            content: message,
+        }),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Discord webhook failed: ${response.status}`);
+    }
+}
     // Incident structure
     type Incident = {
         url: string;
@@ -260,35 +275,44 @@ export class NetworkOperationsAgent extends Agent<
         incidentsHandled: number;
         activeIncidents: string[];
         incidentHistory: Incident[];
-        recentChecks: {
+            recentChecks: {
             url: string;
             online: boolean;
             statusCode: number | null;
             responseTime: number;
             checkedAt: string;
         }[];
+            notifications: {
+            url: string;
+            type: "outage" | "recovery";
+            sentAt: string;
+            success: boolean;
+        }[];
     }
 > {
-    initialState = {
-    status: "Online",
-    incidentsHandled: 0,
-    activeIncidents: [],
-    incidentHistory: [],
-    recentChecks: [],
-};
+        initialState = {
+        status: "Online",
+        incidentsHandled: 0,
+        activeIncidents: [],
+        incidentHistory: [],
+        recentChecks: [],
+        notifications: [],
+    };
 
     onRequest(): Response {
         return Response.json(this.state);
     }
 
     @callable()
-    async recordIncident(url: string): Promise<void> {
+    async recordIncident(url: string): Promise<boolean> {
         const activeIncidents = this.state.activeIncidents ?? [];
 
+        // Prevent duplicate incidents
         if (activeIncidents.includes(url)) {
-            return;
+            return false;
         }
 
+        // Create a new incident
         const newIncident: Incident = {
             url,
             startedAt: new Date().toISOString(),
@@ -296,6 +320,7 @@ export class NetworkOperationsAgent extends Agent<
             status: "active",
         };
 
+        // Update persistent agent state
         this.setState({
             ...this.state,
             incidentsHandled: this.state.incidentsHandled + 1,
@@ -308,17 +333,22 @@ export class NetworkOperationsAgent extends Agent<
                 newIncident
             ],
         });
+
+        // Confirm a new incident was created
+        return true;
     }
     @callable()
-    async resolveIncident(url: string): Promise<void> {
+    async resolveIncident(url: string): Promise<boolean> {
         const activeIncidents = this.state.activeIncidents ?? [];
 
+        // Check whether an active incident exists
         if (!activeIncidents.includes(url)) {
-            return;
+            return false;
         }
 
         const incidentHistory = this.state.incidentHistory ?? [];
 
+        // Update persistent agent state
         this.setState({
             ...this.state,
             activeIncidents: activeIncidents.filter(
@@ -334,7 +364,10 @@ export class NetworkOperationsAgent extends Agent<
                     : incident
             ),
         });
-}
+
+        // Confirm the incident was resolved
+        return true;
+    }
     @callable()
     async recordCheck(check: {
         url: string;
@@ -350,6 +383,27 @@ export class NetworkOperationsAgent extends Agent<
                 check,
                 ...(this.state.recentChecks ?? [])
             ].slice(0, 10),
+        });
+    }
+    @callable()
+    async recordNotification(
+        url: string,
+        type: "outage" | "recovery",
+        success: boolean
+    ): Promise<void> {
+        const notifications = this.state.notifications ?? [];
+
+        this.setState({
+            ...this.state,
+            notifications: [
+                {
+                    url,
+                    type,
+                    sentAt: new Date().toISOString(),
+                    success,
+                },
+                ...notifications,
+            ].slice(0, 50),
         });
     }
 
@@ -396,7 +450,24 @@ export default {
             return new Response(greeting);
         }
         // Temporary incident recovery test
+if (url.pathname === "/test-discord") {
+    try {
+        await sendDiscordAlert(
+            env,
+            "🟢 Network Operations Agent: Discord notifications are working!"
+        );
 
+        return Response.json({
+            success: true,
+            message: "Discord test notification sent",
+        });
+    } catch (error) {
+        return Response.json({
+            success: false,
+            error: String(error),
+        }, { status: 500 });
+    }
+}
 // Test AI connection
 if (url.pathname === "/test-ai") {
     console.log("Sending request to Cloudflare AI...");
@@ -689,10 +760,10 @@ async scheduled(
     );
 
     const websites = [
-        "https://example.com",
-        "https://google.com",
-        "https://cloudflare.com",
-        
+    "https://example.com",
+    "https://google.com",
+    "https://cloudflare.com",
+    
     ];
 
     const agent = env.NETWORK_OPERATIONS_AGENT.getByName("network-ops");
@@ -715,10 +786,50 @@ async scheduled(
             checkedAt: new Date().toISOString(),
         });
 
+        // Website is offline
         if (!result.online) {
-            await agent.recordIncident(website);
-        } else {
-            await agent.resolveIncident(website);
+            const isNewIncident = await agent.recordIncident(website);
+
+            if (isNewIncident) {
+                let success = false;
+
+                try {
+                    await sendDiscordAlert(
+                        env,
+                        `🔴 WEBSITE DOWN\n${website}\nStatus: Offline\nTime: ${new Date().toISOString()}`
+                    );
+
+                    success = true;
+                    console.log("Discord outage alert sent:", website);
+                } catch (error) {
+                    console.error("Failed to send Discord outage alert:", error);
+                }
+
+                await agent.recordNotification(website, "outage", success);
+            }
+        }
+
+        // Website is online
+        else {
+            const wasResolved = await agent.resolveIncident(website);
+
+            if (wasResolved) {
+                let success = false;
+
+                try {
+                    await sendDiscordAlert(
+                        env,
+                        `🟢 WEBSITE RECOVERED\n${website}\nStatus: Online\nResponse time: ${result.responseTime}ms\nTime: ${new Date().toISOString()}`
+                    );
+
+                    success = true;
+                    console.log("Discord recovery alert sent:", website);
+                } catch (error) {
+                    console.error("Failed to send Discord recovery alert:", error);
+                }
+
+                await agent.recordNotification(website, "recovery", success);
+            }
         }
     }
 },
