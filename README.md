@@ -109,7 +109,7 @@ network-operations-agent/
 ### 1. Clone the repository
 
 ```bash
-git clone <YOUR_GITHUB_REPOSITORY>
+git clone (https://github.com/AbdullahiMo938/network-operations-agent/)
 cd network-operations-agent
 ```
 
